@@ -19,10 +19,129 @@
       p.lead {
         color: #57606a;
       }
-      event-editor {
+
+      /* Tab bar */
+      .tabbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        border-bottom: 2px solid #d0d7de;
+        margin-bottom: 20px;
+      }
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px 8px 14px;
+        border: 1px solid #d0d7de;
+        border-bottom: none;
+        border-radius: 8px 8px 0 0;
+        background: #eaeef2;
+        color: #57606a;
+        cursor: pointer;
+        font-size: 0.9rem;
+        position: relative;
+        top: 2px;
+        user-select: none;
+      }
+      .tab.active {
+        background: #fff;
+        color: #1f2328;
+        font-weight: 600;
+        border-color: #d0d7de;
+        border-bottom: 2px solid #fff;
+      }
+      .tab .name {
+        outline: none;
+      }
+      .tab .name[contenteditable="true"] {
+        background: #fff;
+        border-radius: 4px;
+        padding: 0 4px;
+        box-shadow: 0 0 0 2px #0b5fff;
+      }
+      .tab .close {
+        border: none;
+        background: transparent;
+        color: inherit;
+        font-size: 1rem;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0 2px;
+        border-radius: 4px;
+        opacity: 0.6;
+      }
+      .tab .close:hover {
+        opacity: 1;
+        background: rgba(0, 0, 0, 0.08);
+      }
+      .tab .close:disabled {
+        display: none;
+      }
+      .add-tab {
+        border: 1px dashed #d0d7de;
+        background: transparent;
+        color: #57606a;
+        border-radius: 8px;
+        padding: 6px 12px;
+        cursor: pointer;
+        font: inherit;
+        font-size: 0.9rem;
+      }
+      .add-tab:hover {
+        border-color: #0b5fff;
+        color: #0b5fff;
+      }
+
+      /* Panel */
+      .editor-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
         margin-bottom: 24px;
       }
+      .editor-row event-editor {
+        flex: 1;
+        min-width: 0;
+      }
+      .remove-editor {
+        flex: 0 0 auto;
+        margin-top: 4px;
+        border: 1px solid #d0d7de;
+        background: #fff;
+        color: #a50e0e;
+        border-radius: 8px;
+        width: 32px;
+        height: 32px;
+        font-size: 1.1rem;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .remove-editor:hover:not(:disabled) {
+        background: #fce8e6;
+      }
+      .remove-editor:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+      .add-editor {
+        border: 1px dashed #d0d7de;
+        background: transparent;
+        color: #57606a;
+        border-radius: 8px;
+        padding: 8px 14px;
+        cursor: pointer;
+        font: inherit;
+        font-weight: 600;
+      }
+      .add-editor:hover {
+        border-color: #0b5fff;
+        color: #0b5fff;
+      }
+
       #log {
+        margin-top: 32px;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 0.8rem;
         background: #1f2328;
@@ -39,36 +158,287 @@
   <body>
     <h1>OpenSearch Helper</h1>
     <p class="lead">
-      Define a raw JSON event, then push it to OpenSearch. Multiple editors can
-      run side by side — each targets its own index below.
+      Define raw JSON events, then push them to OpenSearch. Organize editors into
+      tabs — double-click a tab to rename it. Everything is saved in your browser
+      and restored on reload.
     </p>
 
-    <event-editor index="events">
-      <h3 slot="heading">Application events → <code>events</code></h3>
-    </event-editor>
-
-    <event-editor index="audit">
-      <h3 slot="heading">Audit log → <code>audit</code></h3>
-    </event-editor>
+    <div class="tabbar" id="tabbar"></div>
+    <div class="panel" id="panel"></div>
 
     <h2 style="font-size: 1rem">Activity log</h2>
     <div id="log">Waiting for events…</div>
 
     <script>
-      // Demonstrates listening to the component's custom events. Because they
-      // are composed, a single delegated listener on the document catches every
-      // editor instance on the page.
-      const log = document.getElementById("log");
+      // ---- Persistence ------------------------------------------------------
+      // The full app state (tabs, names, active tab, and every editor's index +
+      // JSON content) lives in a single localStorage entry. Structure is the
+      // source of truth in `state`; live editor text is captured from the DOM
+      // back into `state` before every save and before any structural change.
+      const STORAGE_KEY = "os-helper-state";
+
+      const defaultState = () => ({
+        active: 0,
+        tabs: [{ name: "Tab #1", editors: [{ index: "", content: "" }] }],
+      });
+
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return defaultState();
+          const s = JSON.parse(raw);
+          if (!s || !Array.isArray(s.tabs) || s.tabs.length === 0)
+            return defaultState();
+          // Normalize to guard against malformed/partial data.
+          s.tabs = s.tabs.map((t, i) => ({
+            name: typeof t.name === "string" ? t.name : `Tab #${i + 1}`,
+            editors:
+              Array.isArray(t.editors) && t.editors.length
+                ? t.editors.map((e) => ({
+                    index: typeof e.index === "string" ? e.index : "",
+                    content: typeof e.content === "string" ? e.content : "",
+                  }))
+                : [{ index: "", content: "" }],
+          }));
+          s.active = Math.min(Math.max(0, s.active | 0), s.tabs.length - 1);
+          return s;
+        } catch {
+          return defaultState();
+        }
+      }
+
+      let state = loadState();
+
+      function save() {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      }
+
+      // ---- Helpers ----------------------------------------------------------
+      const tabbar = document.getElementById("tabbar");
+      const panel = document.getElementById("panel");
+
+      // Pull the live text out of the currently-rendered editors back into
+      // state so it is never lost on a re-render, tab switch, or save.
+      function captureActivePanel() {
+        const tab = state.tabs[state.active];
+        if (!tab) return;
+        const editors = panel.querySelectorAll("event-editor");
+        tab.editors = Array.from(editors).map((ed) => ({
+          index: ed.indexValue,
+          content: ed.value,
+        }));
+      }
+
+      const nextTabName = () => {
+        // First unused "Tab #n" so names stay tidy after removals.
+        let n = 1;
+        const names = new Set(state.tabs.map((t) => t.name));
+        while (names.has(`Tab #${n}`)) n++;
+        return `Tab #${n}`;
+      };
+
+      // ---- Rendering --------------------------------------------------------
+      function renderTabbar() {
+        tabbar.innerHTML = "";
+        state.tabs.forEach((tab, i) => {
+          const el = document.createElement("div");
+          el.className = "tab" + (i === state.active ? " active" : "");
+          el.title = "Double-click to rename";
+
+          const name = document.createElement("span");
+          name.className = "name";
+          name.textContent = tab.name;
+
+          // Single click selects; double-click renames (contenteditable).
+          el.addEventListener("click", () => {
+            if (name.isContentEditable) return;
+            selectTab(i);
+          });
+          el.addEventListener("dblclick", () => beginRename(name, i));
+
+          const close = document.createElement("button");
+          close.className = "close";
+          close.type = "button";
+          close.textContent = "×";
+          close.title = "Close tab";
+          close.disabled = state.tabs.length <= 1;
+          close.addEventListener("click", (ev) => {
+            ev.stopPropagation();
+            removeTab(i);
+          });
+
+          el.appendChild(name);
+          el.appendChild(close);
+          tabbar.appendChild(el);
+        });
+
+        const add = document.createElement("button");
+        add.className = "add-tab";
+        add.type = "button";
+        add.textContent = "+ Tab";
+        add.addEventListener("click", addTab);
+        tabbar.appendChild(add);
+      }
+
+      function beginRename(nameEl, i) {
+        nameEl.setAttribute("contenteditable", "true");
+        nameEl.focus();
+        // Select all text for quick replacement.
+        const range = document.createRange();
+        range.selectNodeContents(nameEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        const commit = () => {
+          nameEl.removeAttribute("contenteditable");
+          const val = nameEl.textContent.trim();
+          state.tabs[i].name = val || `Tab #${i + 1}`;
+          nameEl.textContent = state.tabs[i].name;
+          save();
+        };
+        nameEl.addEventListener("blur", commit, { once: true });
+        nameEl.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            nameEl.blur();
+          } else if (ev.key === "Escape") {
+            ev.preventDefault();
+            nameEl.textContent = state.tabs[i].name;
+            nameEl.blur();
+          }
+        });
+      }
+
+      function renderPanel() {
+        panel.innerHTML = "";
+        const tab = state.tabs[state.active];
+
+        tab.editors.forEach((editor, j) => {
+          const row = document.createElement("div");
+          row.className = "editor-row";
+
+          const ed = document.createElement("event-editor");
+          ed.setAttribute("index", editor.index);
+          // Assign live values (buffered until the element renders).
+          ed.value = editor.content;
+          ed.indexValue = editor.index;
+
+          const remove = document.createElement("button");
+          remove.className = "remove-editor";
+          remove.type = "button";
+          remove.textContent = "×";
+          remove.title = "Remove editor";
+          remove.disabled = tab.editors.length <= 1;
+          remove.addEventListener("click", () => removeEditor(j));
+
+          row.appendChild(ed);
+          row.appendChild(remove);
+          panel.appendChild(row);
+        });
+
+        const add = document.createElement("button");
+        add.className = "add-editor";
+        add.type = "button";
+        add.textContent = "+ Add editor";
+        add.addEventListener("click", addEditor);
+        panel.appendChild(add);
+      }
+
+      // ---- Actions ----------------------------------------------------------
+      function selectTab(i) {
+        if (i === state.active) return;
+        captureActivePanel();
+        state.active = i;
+        save();
+        renderTabbar();
+        renderPanel();
+      }
+
+      function addTab() {
+        captureActivePanel();
+        state.tabs.push({ name: nextTabName(), editors: [{ index: "", content: "" }] });
+        state.active = state.tabs.length - 1;
+        save();
+        renderTabbar();
+        renderPanel();
+      }
+
+      function removeTab(i) {
+        if (state.tabs.length <= 1) return;
+        if (i === state.active) {
+          // Dropping the active tab: don't capture its (about-to-die) editors.
+          state.tabs.splice(i, 1);
+          state.active = Math.min(i, state.tabs.length - 1);
+          save();
+          renderTabbar();
+          renderPanel();
+        } else {
+          captureActivePanel();
+          state.tabs.splice(i, 1);
+          if (i < state.active) state.active--;
+          save();
+          renderTabbar();
+          renderPanel();
+        }
+      }
+
+      function addEditor() {
+        captureActivePanel();
+        state.tabs[state.active].editors.push({ index: "", content: "" });
+        save();
+        renderPanel();
+      }
+
+      function removeEditor(j) {
+        const tab = state.tabs[state.active];
+        if (tab.editors.length <= 1) return;
+        captureActivePanel();
+        tab.editors.splice(j, 1);
+        save();
+        renderPanel();
+      }
+
+      // Debounced autosave: any keystroke inside an editor (input events are
+      // composed, so they cross the shadow boundary) captures + persists state.
+      let saveTimer = null;
+      panel.addEventListener("input", () => {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          captureActivePanel();
+          save();
+        }, 300);
+      });
+      // Capture immediately when focus leaves an editor, too.
+      panel.addEventListener(
+        "focusout",
+        () => {
+          captureActivePanel();
+          save();
+        },
+        true
+      );
+
+      // ---- Activity log -----------------------------------------------------
+      const logEl = document.getElementById("log");
       const append = (line) => {
-        if (log.textContent === "Waiting for events…") log.textContent = "";
-        log.textContent += line + "\n";
-        log.scrollTop = log.scrollHeight;
+        if (logEl.textContent === "Waiting for events…") logEl.textContent = "";
+        logEl.textContent += line + "\n";
+        logEl.scrollTop = logEl.scrollHeight;
       };
       document.addEventListener("event-pushed", (e) => {
         append(`✓ pushed id=${e.detail.response.id} index=${e.detail.response.index}`);
       });
       document.addEventListener("event-error", (e) => {
         append(`✗ error: ${e.detail.message}`);
+      });
+
+      // ---- Boot -------------------------------------------------------------
+      renderTabbar();
+      renderPanel();
+      window.addEventListener("beforeunload", () => {
+        captureActivePanel();
+        save();
       });
     </script>
   </body>

@@ -83,14 +83,18 @@ Vanilla custom element, shadow DOM, no build step. Just include the script:
 <event-editor endpoint="/api/events" index="events"></event-editor>
 ```
 
-**Attributes:** `endpoint` (default `/api/events`), `index`, `placeholder`.
+**Attributes:** `endpoint` (default `/api/events`), `index` (seeds the target-index
+input field — the user can edit it before pushing), `placeholder`.
+
+The component renders an **Index** text field; its value at push time determines
+the target index (`?index=`). Pushing with an empty index is blocked client-side.
 
 **Events** (bubble + composed):
 `event-pushed` → `detail.response`, `event-error` → `detail.message`.
 
 **Slots:** `heading` for a custom title.
 
-**Parts** (for outside styling): `input`, `button`.
+**Parts** (for outside styling): `index`, `input`, `button`.
 
 Multiple instances are fully isolated and can coexist on one page.
 

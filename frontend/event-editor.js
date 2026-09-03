@@ -4,15 +4,13 @@
  *
  * Attributes:
  *   endpoint  URL the event is POSTed to. Default: "/api/events".
- *   index     Optional target index; appended as a ?index= query parameter.
+ *   index     Initial value for the target-index input field. The user can
+ *             edit it; the value at push time is appended as ?index=.
  *   placeholder  Placeholder text for the editor textarea.
  *
  * Events (bubble + composed, so they cross the shadow boundary):
  *   event-pushed   detail: { response }  — dispatched on a successful push.
  *   event-error    detail: { message }   — dispatched on any failure.
- *
- * Slots:
- *   heading   Optional custom heading content above the editor.
  *
  * The component has no external dependencies, uses shadow DOM for style
  * encapsulation, and supports any number of instances on a single page.
@@ -26,6 +24,20 @@ class EventEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._onPush = this._onPush.bind(this);
+    // If value/indexValue were assigned before this element was upgraded
+    // (e.g. the host script ran before event-editor.js loaded), those
+    // assignments sit as own properties that shadow the accessors below.
+    // Re-route them through the setters so state restore/capture works.
+    this._upgradeProperty("value");
+    this._upgradeProperty("indexValue");
+  }
+
+  _upgradeProperty(prop) {
+    if (Object.prototype.hasOwnProperty.call(this, prop)) {
+      const v = this[prop];
+      delete this[prop];
+      this[prop] = v;
+    }
   }
 
   connectedCallback() {
@@ -35,9 +47,11 @@ class EventEditor extends HTMLElement {
   attributeChangedCallback() {
     // Re-render only if already rendered (attributes may change post-connect).
     if (this.shadowRoot.childElementCount > 0) {
-      const value = this._textarea ? this._textarea.value : "";
+      const doc = this._textarea ? this._textarea.value : "";
+      const idx = this._indexInput ? this._indexInput.value : "";
       this._render();
-      if (this._textarea) this._textarea.value = value;
+      if (this._textarea) this._textarea.value = doc;
+      if (this._indexInput && idx) this._indexInput.value = idx;
     }
   }
 
@@ -54,6 +68,30 @@ class EventEditor extends HTMLElement {
       this.getAttribute("placeholder") ||
       '{\n  "message": "hello world",\n  "level": "info"\n}'
     );
+  }
+
+  /**
+   * Live JSON content of the editor textarea. Readable/writable at any time —
+   * before the element is rendered, the assignment is buffered and applied on
+   * the next render. Lets a host page snapshot and restore editor state.
+   */
+  get value() {
+    return this._textarea ? this._textarea.value : this._pendingValue || "";
+  }
+
+  set value(v) {
+    this._pendingValue = v == null ? "" : String(v);
+    if (this._textarea) this._textarea.value = this._pendingValue;
+  }
+
+  /** Live value of the target-index input (as opposed to the seed attribute). */
+  get indexValue() {
+    return this._indexInput ? this._indexInput.value : this._pendingIndex || "";
+  }
+
+  set indexValue(v) {
+    this._pendingIndex = v == null ? "" : String(v);
+    if (this._indexInput) this._indexInput.value = this._pendingIndex;
   }
 
   _render() {
@@ -81,6 +119,28 @@ class EventEditor extends HTMLElement {
           font-size: 1rem;
           font-weight: 600;
         }
+        .field {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 10px;
+        }
+        .field label {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: #57606a;
+          white-space: nowrap;
+        }
+        input.index {
+          flex: 1;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+          font-size: 0.875rem;
+          padding: 8px 10px;
+          border: 1px solid var(--ee-border);
+          border-radius: var(--ee-radius);
+          outline: none;
+        }
+        input.index:focus { border-color: var(--ee-accent); }
         textarea {
           width: 100%;
           min-height: 160px;
@@ -118,6 +178,17 @@ class EventEditor extends HTMLElement {
           background: transparent;
           border: 1px solid var(--ee-border);
         }
+        .count {
+          margin-left: auto;
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: #57606a;
+          background: #eaeef2;
+          border-radius: 999px;
+          padding: 4px 10px;
+          min-width: 1.5rem;
+          text-align: center;
+        }
         .status {
           margin-top: 12px;
           padding: 10px 12px;
@@ -132,22 +203,39 @@ class EventEditor extends HTMLElement {
         .status.error { background: #fce8e6; color: #a50e0e; }
       </style>
       <div class="card">
-        <slot name="heading"><h3 class="heading">Event Editor</h3></slot>
+        <div class="field">
+          <label for="index-input">Index</label>
+          <input id="index-input" class="index" part="index" type="text"
+            spellcheck="false" placeholder="events"
+            value="${this._escape(this.index)}" />
+        </div>
         <textarea part="input" spellcheck="false" placeholder="${this._escape(
           this.placeholder
         )}"></textarea>
         <div class="toolbar">
           <button type="button" part="button" class="push">Push</button>
           <button type="button" class="format">Format</button>
+          <span class="count" part="count" title="Pushes this session">0</span>
         </div>
         <div class="status" role="status" aria-live="polite"></div>
       </div>
     `;
 
     this._textarea = this.shadowRoot.querySelector("textarea");
+    this._indexInput = this.shadowRoot.querySelector("input.index");
     this._pushBtn = this.shadowRoot.querySelector(".push");
     this._formatBtn = this.shadowRoot.querySelector(".format");
+    this._count = this.shadowRoot.querySelector(".count");
     this._status = this.shadowRoot.querySelector(".status");
+
+    // Re-apply any values buffered before this (re-)render so live state and
+    // pre-connect assignments survive attribute-driven re-renders.
+    if (this._pendingValue != null) this._textarea.value = this._pendingValue;
+    if (this._pendingIndex != null) this._indexInput.value = this._pendingIndex;
+    // Session-only push counter — deliberately never persisted, so it resets
+    // on reload. Re-applied here so an attribute-driven re-render keeps it.
+    if (this._pushCount == null) this._pushCount = 0;
+    this._count.textContent = String(this._pushCount);
 
     this._pushBtn.addEventListener("click", this._onPush);
     this._formatBtn.addEventListener("click", () => this._format());
@@ -174,6 +262,10 @@ class EventEditor extends HTMLElement {
   }
 
   async _onPush() {
+    // Count every press of the Push button for this session (in-memory only).
+    this._pushCount = (this._pushCount || 0) + 1;
+    this._count.textContent = String(this._pushCount);
+
     const raw = this._textarea.value.trim();
     if (!raw) {
       this._fail("Please enter a JSON event before pushing.");
@@ -193,12 +285,14 @@ class EventEditor extends HTMLElement {
       return;
     }
 
-    let url = this.endpoint;
-    if (this.index) {
-      url += `${url.includes("?") ? "&" : "?"}index=${encodeURIComponent(
-        this.index
-      )}`;
+    const index = this._indexInput.value.trim();
+    if (!index) {
+      this._fail("Please enter a target index.");
+      return;
     }
+
+    let url = this.endpoint;
+    url += `${url.includes("?") ? "&" : "?"}index=${encodeURIComponent(index)}`;
 
     this._pushBtn.disabled = true;
     this._pushBtn.textContent = "Pushing…";
