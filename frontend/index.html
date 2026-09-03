@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenSearch Helper</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 32px 16px 64px;
+        color: #1f2328;
+        background: #f6f8fa;
+      }
+      h1 {
+        font-size: 1.5rem;
+      }
+      p.lead {
+        color: #57606a;
+      }
+      event-editor {
+        margin-bottom: 24px;
+      }
+      #log {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8rem;
+        background: #1f2328;
+        color: #d1d5da;
+        border-radius: 8px;
+        padding: 12px;
+        max-height: 200px;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+    </style>
+    <script src="event-editor.js" defer></script>
+  </head>
+  <body>
+    <h1>OpenSearch Helper</h1>
+    <p class="lead">
+      Define a raw JSON event, then push it to OpenSearch. Multiple editors can
+      run side by side — each targets its own index below.
+    </p>
+
+    <event-editor index="events">
+      <h3 slot="heading">Application events → <code>events</code></h3>
+    </event-editor>
+
+    <event-editor index="audit">
+      <h3 slot="heading">Audit log → <code>audit</code></h3>
+    </event-editor>
+
+    <h2 style="font-size: 1rem">Activity log</h2>
+    <div id="log">Waiting for events…</div>
+
+    <script>
+      // Demonstrates listening to the component's custom events. Because they
+      // are composed, a single delegated listener on the document catches every
+      // editor instance on the page.
+      const log = document.getElementById("log");
+      const append = (line) => {
+        if (log.textContent === "Waiting for events…") log.textContent = "";
+        log.textContent += line + "\n";
+        log.scrollTop = log.scrollHeight;
+      };
+      document.addEventListener("event-pushed", (e) => {
+        append(`✓ pushed id=${e.detail.response.id} index=${e.detail.response.index}`);
+      });
+      document.addEventListener("event-error", (e) => {
+        append(`✗ error: ${e.detail.message}`);
+      });
+    </script>
+  </body>
+</html>
