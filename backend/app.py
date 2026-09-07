@@ -16,6 +16,13 @@ import json
 import logging
 import os
 
+from anomaly_service import (
+    FEATURES,
+    AnomalyModelNotReady,
+    analyze_event,
+    train_model,
+    training_count,
+)
 from config import config
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
@@ -130,16 +137,102 @@ def create_event() -> object:
             502,
         )
 
+    # Run the freshly-indexed event through the anomaly recognition service.
+    # A failure here (e.g. model not yet trained) must not fail event creation,
+    # so it is reported alongside the successful indexing result.
+    anomaly: dict[str, object] | None = None
+    anomaly_error: str | None = None
+    try:
+        anomaly = analyze_event(document)
+    except AnomalyModelNotReady as exc:
+        anomaly_error = str(exc)
+        logger.warning("Anomaly analysis skipped: %s", exc)
+    except OpenSearchException as exc:
+        anomaly_error = f"OpenSearch error during analysis: {exc}"
+        logger.exception("Anomaly analysis failed")
+
+    body: dict[str, object] = {
+        "status": "ok",
+        "id": result.get("_id"),
+        "index": result.get("_index"),
+        "result": result.get("result"),
+    }
+    if anomaly is not None:
+        body["anomaly"] = anomaly
+    if anomaly_error is not None:
+        body["anomaly_error"] = anomaly_error
+
+    return jsonify(body), 201
+
+
+@app.post("/api/anomaly/analyze")
+def analyze() -> object:
+    """Score a JSON event for anomalies *without* indexing it.
+
+    The request body must be a JSON object. Returns the anomaly analysis (see
+    :func:`anomaly_service.analyze_event`).
+
+    Returns:
+        ``200`` with the analysis, ``400`` for malformed input, ``409`` when the
+        detector has no training data, ``502`` when OpenSearch is unreachable.
+    """
+    raw = request.get_data(as_text=True)
+    if not raw or not raw.strip():
+        return jsonify({"status": "error", "message": "Request body is empty."}), 400
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return (
+            jsonify({"status": "error", "message": f"Invalid JSON: {exc.msg}."}),
+            400,
+        )
+    if not isinstance(document, dict) or not document:
+        return (
+            jsonify(
+                {"status": "error", "message": "Event must be a non-empty JSON object."}
+            ),
+            400,
+        )
+
+    try:
+        anomaly = analyze_event(document)
+    except AnomalyModelNotReady as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 409
+    except OpenSearchException as exc:
+        logger.exception("Anomaly analysis failed")
+        return jsonify({"status": "error", "message": f"OpenSearch error: {exc}"}), 502
+
+    return jsonify({"status": "ok", "anomaly": anomaly}), 200
+
+
+@app.post("/api/anomaly/retrain")
+def retrain() -> object:
+    """Force a retrain of the Isolation Forest from current OpenSearch data.
+
+    Call this after (re)seeding the transactions index so the model reflects the
+    new data.
+
+    Returns:
+        ``200`` with the number of transactions trained on, ``409`` when there
+        is no training data, ``502`` when OpenSearch is unreachable.
+    """
+    try:
+        train_model(force=True)
+    except AnomalyModelNotReady as exc:
+        return jsonify({"status": "error", "message": str(exc)}), 409
+    except OpenSearchException as exc:
+        logger.exception("Model retraining failed")
+        return jsonify({"status": "error", "message": f"OpenSearch error: {exc}"}), 502
+
     return (
         jsonify(
             {
                 "status": "ok",
-                "id": result.get("_id"),
-                "index": result.get("_index"),
-                "result": result.get("result"),
+                "trained_on": training_count(),
+                "features": list(FEATURES),
             }
         ),
-        201,
+        200,
     )
 
 

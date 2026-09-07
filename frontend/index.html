@@ -154,9 +154,12 @@
       }
     </style>
     <script src="event-editor.js" defer></script>
+    <script src="app-modal.js" defer></script>
   </head>
   <body>
-    <h1>OpenSearch Helper</h1>
+    <h1>
+      OpenSearch Helper
+    </h1>
     <p class="lead">
       Define raw JSON events, then push them to OpenSearch. Organize editors into
       tabs — double-click a tab to rename it. Everything is saved in your browser
@@ -168,6 +171,18 @@
 
     <h2 style="font-size: 1rem">Activity log</h2>
     <div id="log">Waiting for events…</div>
+
+    <app-modal id="anomaly-modal">
+      <span slot="heading" id="anomaly-heading">Anomaly result</span>
+      <pre id="anomaly-json" style="
+        margin: 0;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.8rem;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      "></pre>
+    </app-modal>
 
     <script>
       // ---- Persistence ------------------------------------------------------
@@ -426,8 +441,30 @@
         logEl.textContent += line + "\n";
         logEl.scrollTop = logEl.scrollHeight;
       };
+      // ---- Anomaly result modal --------------------------------------------
+      const anomalyModal = document.getElementById("anomaly-modal");
+      const anomalyHeading = document.getElementById("anomaly-heading");
+      const anomalyJson = document.getElementById("anomaly-json");
+
+      function showAnomaly(response) {
+        // The backend attaches the detector output under `anomaly`, or an
+        // `anomaly_error` string if scoring failed (indexing still succeeds).
+        const payload =
+          response.anomaly ??
+          (response.anomaly_error != null
+            ? { anomaly_error: response.anomaly_error }
+            : { note: "No anomaly result was returned for this event." });
+        const verdict = response.anomaly && response.anomaly.verdict;
+        anomalyHeading.textContent = verdict
+          ? `Anomaly result — ${verdict}`
+          : "Anomaly result";
+        anomalyJson.textContent = JSON.stringify(payload, null, 2);
+        anomalyModal.show();
+      }
+
       document.addEventListener("event-pushed", (e) => {
         append(`✓ pushed id=${e.detail.response.id} index=${e.detail.response.index}`);
+        showAnomaly(e.detail.response);
       });
       document.addEventListener("event-error", (e) => {
         append(`✗ error: ${e.detail.message}`);

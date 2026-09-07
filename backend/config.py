@@ -47,6 +47,16 @@ class Config:
     # Default index events are written to when the request does not specify one.
     default_index: str = os.getenv("OPENSEARCH_INDEX", "events")
 
+    # Index holding the financial transactions the anomaly detector trains on.
+    transactions_index: str = os.getenv("OPENSEARCH_TRANSACTIONS_INDEX", "transactions")
+
+    # Expected fraction of anomalies in the training data. Passed to the
+    # Isolation Forest as its ``contamination`` parameter.
+    anomaly_contamination: float = float(os.getenv("ANOMALY_CONTAMINATION", "0.05"))
+
+    # Maximum number of transactions pulled from OpenSearch to train the model.
+    anomaly_training_size: int = int(os.getenv("ANOMALY_TRAINING_SIZE", "10000"))
+
     # Maximum accepted request body size in bytes (default 1 MiB).
     max_content_length: int = int(os.getenv("MAX_CONTENT_LENGTH", str(1024 * 1024)))
 
