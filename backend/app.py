@@ -4,6 +4,7 @@ Endpoints:
     ``GET  /``            Serve the demo page hosting ``<event-editor>``.
     ``GET  /health``      Liveness / OpenSearch connectivity probe.
     ``POST /api/events``  Validate a JSON event and index it into OpenSearch.
+    ``DELETE /api/events`` Delete all documents from the given index.
 
 The frontend (static Web Component) is served from the sibling ``frontend``
 directory so the whole tool runs from a single process.
@@ -19,8 +20,8 @@ import os
 from config import config
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
-from opensearch_client import ping, push_event
-from opensearchpy.exceptions import OpenSearchException
+from opensearch_client import clear_index, ping, push_event
+from opensearchpy.exceptions import NotFoundError, OpenSearchException
 
 logging.basicConfig(
     level=logging.DEBUG if config.debug else logging.INFO,
@@ -140,6 +141,73 @@ def create_event() -> object:
             }
         ),
         201,
+    )
+
+@app.delete("/api/events")
+def delete_events() -> object:
+    """Delete every document from an index, keeping the index itself.
+
+    The target index must be given explicitly via ``?index=<name>``; unlike
+    ``POST``, this destructive operation never falls back to the configured
+    default index.
+
+    Returns:
+        A JSON response with the number of deleted documents. ``200`` on
+        success, ``400`` when no index is given, ``404`` when the index does
+        not exist, ``502`` when OpenSearch rejects or cannot serve the request.
+    """
+    index = (request.args.get("index") or "").strip()
+    if not index:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "Query parameter 'index' is required.",
+                }
+            ),
+            400,
+        )
+
+    try:
+        result = clear_index(index)
+    except NotFoundError:
+        logger.warning("Cannot clear unknown index '%s'", index)
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"Index '{index}' does not exist.",
+                }
+            ),
+            404,
+        )
+    except OpenSearchException as exc:
+        logger.exception("Failed to clear index '%s'", index)
+        try:
+            detail = str(exc) or exc.__class__.__name__
+        except Exception:  # noqa: BLE001 - some OS exceptions raise on str()
+            detail = exc.__class__.__name__
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": f"OpenSearch error: {detail}",
+                }
+            ),
+            502,
+        )
+
+    failures = result.get("failures") or []
+    return (
+        jsonify(
+            {
+                "status": "ok",
+                "index": index,
+                "deleted": result.get("deleted", 0),
+                "failures": len(failures),
+            }
+        ),
+        200,
     )
 
 

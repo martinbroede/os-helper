@@ -10,6 +10,8 @@
  *
  * Events (bubble + composed, so they cross the shadow boundary):
  *   event-pushed   detail: { response }  — dispatched on a successful push.
+ *   index-cleared  detail: { response }  — dispatched after the target index
+ *                                          was emptied via the Clear button.
  *   event-error    detail: { message }   — dispatched on any failure.
  *
  * The component has no external dependencies, uses shadow DOM for style
@@ -24,6 +26,7 @@ class EventEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._onPush = this._onPush.bind(this);
+    this._onClear = this._onClear.bind(this);
     // If value/indexValue were assigned before this element was upgraded
     // (e.g. the host script ran before event-editor.js loaded), those
     // assignments sit as own properties that shadow the accessors below.
@@ -141,6 +144,20 @@ class EventEditor extends HTMLElement {
           outline: none;
         }
         input.index:focus { border-color: var(--ee-accent); }
+        button.clear {
+          flex: 0 0 auto;
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: #a50e0e;
+          background: #fff;
+          border: 1px solid var(--ee-border);
+          padding: 8px 12px;
+        }
+        button.clear:hover:not(:disabled) {
+          background: #fce8e6;
+          border-color: #a50e0e;
+          filter: none;
+        }
         textarea {
           width: 100%;
           min-height: 160px;
@@ -208,6 +225,8 @@ class EventEditor extends HTMLElement {
           <input id="index-input" class="index" part="index" type="text"
             spellcheck="false" placeholder="events"
             value="${this._escape(this.index)}" />
+          <button type="button" part="clear" class="clear"
+            title="Delete all documents from this index">Clear</button>
         </div>
         <textarea part="input" spellcheck="false" placeholder="${this._escape(
           this.placeholder
@@ -224,6 +243,7 @@ class EventEditor extends HTMLElement {
     this._textarea = this.shadowRoot.querySelector("textarea");
     this._indexInput = this.shadowRoot.querySelector("input.index");
     this._pushBtn = this.shadowRoot.querySelector(".push");
+    this._clearBtn = this.shadowRoot.querySelector(".clear");
     this._formatBtn = this.shadowRoot.querySelector(".format");
     this._count = this.shadowRoot.querySelector(".count");
     this._status = this.shadowRoot.querySelector(".status");
@@ -239,6 +259,7 @@ class EventEditor extends HTMLElement {
 
     this._pushBtn.addEventListener("click", this._onPush);
     this._formatBtn.addEventListener("click", () => this._format());
+    this._clearBtn.addEventListener("click", this._onClear);
   }
 
   _escape(text) {
@@ -325,6 +346,49 @@ class EventEditor extends HTMLElement {
     } finally {
       this._pushBtn.disabled = false;
       this._pushBtn.textContent = "Push";
+    }
+  }
+
+  /**
+   * Delete every document from the index currently named in the index field.
+   */
+  async _onClear() {
+    const index = this._indexInput.value.trim();
+    if (!index) {
+      this._fail("Please enter a target index.");
+      return;
+    }
+
+    let url = this.endpoint;
+    url += `${url.includes("?") ? "&" : "?"}index=${encodeURIComponent(index)}`;
+
+    this._clearBtn.disabled = true;
+    this._clearBtn.textContent = "Clearing…";
+    try {
+      const res = await fetch(url, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        this._fail(data.message || `Request failed (HTTP ${res.status}).`);
+        return;
+      }
+
+      this._showStatus(
+        `Cleared "${data.index}" (${data.deleted} document(s) deleted).`,
+        "success"
+      );
+      this.dispatchEvent(
+        new CustomEvent("index-cleared", {
+          detail: { response: data },
+          bubbles: true,
+          composed: true,
+        })
+      );
+    } catch (err) {
+      this._fail(`Network error: ${err.message}`);
+    } finally {
+      this._clearBtn.disabled = false;
+      this._clearBtn.textContent = "Clear";
     }
   }
 

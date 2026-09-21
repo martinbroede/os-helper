@@ -70,6 +70,25 @@ Responses:
 | 413    | Payload exceeds `MAX_CONTENT_LENGTH`               |
 | 502    | OpenSearch rejected the request or is unreachable  |
 
+### `DELETE /api/events`
+
+Deletes **all documents** from an index (via `delete_by_query`), keeping the
+index itself. The target index must be given explicitly — unlike `POST`, this
+destructive endpoint never falls back to the configured default index.
+
+```bash
+curl -X DELETE "http://127.0.0.1:5000/api/events?index=events"
+```
+
+Responses:
+
+| Status | Meaning                                                   |
+| ------ | --------------------------------------------------------- |
+| 200    | `{"status":"ok","index":...,"deleted":N,"failures":N}`     |
+| 400    | Missing / empty `index` query parameter                    |
+| 404    | Index does not exist                                       |
+| 502    | OpenSearch rejected the request or is unreachable          |
+
 ### `GET /health`
 
 Liveness probe; reports OpenSearch connectivity (`200` up / `503` down).
@@ -88,13 +107,16 @@ input field — the user can edit it before pushing), `placeholder`.
 
 The component renders an **Index** text field; its value at push time determines
 the target index (`?index=`). Pushing with an empty index is blocked client-side.
+Next to it, a **Clear** button empties that index (`DELETE` on the same
+endpoint).
 
 **Events** (bubble + composed):
-`event-pushed` → `detail.response`, `event-error` → `detail.message`.
+`event-pushed` → `detail.response`, `index-cleared` → `detail.response`,
+`event-error` → `detail.message`.
 
 **Slots:** `heading` for a custom title.
 
-**Parts** (for outside styling): `index`, `input`, `button`.
+**Parts** (for outside styling): `index`, `clear`, `input`, `button`.
 
 Multiple instances are fully isolated and can coexist on one page.
 

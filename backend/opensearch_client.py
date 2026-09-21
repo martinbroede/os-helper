@@ -85,3 +85,33 @@ def ping() -> bool:
     except OpenSearchException as exc:  # pragma: no cover - network dependent
         logger.warning("OpenSearch ping failed: %s", exc)
         return False
+
+
+def clear_index(index: str) -> dict[str, Any]:
+    """Delete every document from an index, keeping the index itself.
+
+    Args:
+        index: Name of the index to empty.
+
+    Returns:
+        The raw ``delete_by_query`` response body (contains ``deleted``,
+        ``total``, ``failures``, etc.).
+
+    Raises:
+        NotFoundError: If the index does not exist.
+        OpenSearchException: If OpenSearch rejects the request or is
+            unreachable.
+    """
+    client = get_client()
+    response = client.delete_by_query(
+        index=index,
+        body={"query": {"match_all": {}}},
+        refresh=True,
+    )
+    logger.info(
+        "Cleared index '%s' (deleted=%s, failures=%s)",
+        index,
+        response.get("deleted"),
+        len(response.get("failures") or []),
+    )
+    return response

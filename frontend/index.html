@@ -429,6 +429,11 @@
       document.addEventListener("event-pushed", (e) => {
         append(`✓ pushed id=${e.detail.response.id} index=${e.detail.response.index}`);
       });
+      document.addEventListener("index-cleared", (e) => {
+        append(
+          `✓ cleared index=${e.detail.response.index} deleted=${e.detail.response.deleted}`
+        );
+      });
       document.addEventListener("event-error", (e) => {
         append(`✗ error: ${e.detail.message}`);
       });

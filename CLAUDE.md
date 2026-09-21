@@ -41,10 +41,13 @@ Three-layer backend, all config-driven via environment variables:
   actual `push_event`/`ping`.
 - `backend/app.py` — Flask routes. `POST /api/events` validates that the body is
   a non-empty JSON **object**, injects an `@timestamp` if absent, and indexes
-  with `refresh=True`. `GET /health` reports OpenSearch reachability. `GET /` and
-  `GET /<path>` serve static files from `../frontend`. Errors map to specific
-  status codes: 400 (bad/empty/non-object JSON), 413 (over `MAX_CONTENT_LENGTH`),
-  502 (`OpenSearchException`).
+  with `refresh=True`. `DELETE /api/events` empties an index via
+  `delete_by_query` (match_all, `refresh=True`), keeping the index; `?index=` is
+  **required** there — a destructive op never falls back to `default_index`.
+  `GET /health` reports OpenSearch reachability. `GET /` and `GET /<path>` serve
+  static files from `../frontend`. Errors map to specific status codes: 400
+  (bad/empty/non-object JSON, missing index), 404 (`NotFoundError` — unknown
+  index), 413 (over `MAX_CONTENT_LENGTH`), 502 (`OpenSearchException`).
 
 Frontend `frontend/event-editor.js` — a single `EventEditor` custom element using
 shadow DOM (fully style/DOM isolated, so multiple instances coexist). Key
@@ -53,9 +56,11 @@ contract used by the backend/demo page:
 - Attributes: `endpoint` (default `/api/events`), `index` (seeds the editable
   index field), `placeholder`. The **index value at push time** becomes the
   `?index=` query param; empty index is blocked client-side.
-- Emits bubbling + composed events: `event-pushed` (`detail.response`) and
-  `event-error` (`detail.message`).
-- Exposes CSS `part`s: `index`, `input`, `button`; and a `heading` slot.
+- A **Clear** button beside the index field DELETEs the same endpoint with that
+  `?index=`.
+- Emits bubbling + composed events: `event-pushed` (`detail.response`),
+  `index-cleared` (`detail.response`) and `event-error` (`detail.message`).
+- Exposes CSS `part`s: `index`, `clear`, `input`, `button`; and a `heading` slot.
 
 The API/component contract is documented in detail in `README.md` — keep it in
 sync when changing endpoints, attributes, events, or parts.
